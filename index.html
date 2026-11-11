@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VR & AR Christmas Dinner</title>
+  <meta name="description" content="Pick a date, bring a dish, join secret santa. The VR & AR group Christmas dinner.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎄</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="snow" id="snow" aria-hidden="true"></div>
+
+  <header class="hero">
+    <svg class="mascot" viewBox="0 0 140 110" role="img" aria-label="A VR headset wearing a santa hat">
+      <rect x="4" y="62" width="16" height="12" rx="6" fill="#1d3b33"/>
+      <rect x="120" y="62" width="16" height="12" rx="6" fill="#1d3b33"/>
+      <rect x="14" y="46" width="112" height="50" rx="20" fill="#fdf6ea"/>
+      <rect x="24" y="55" width="92" height="32" rx="14" fill="#24463d"/>
+      <path d="M44 74 q8 -10 16 0" stroke="#f3c66b" stroke-width="4" fill="none" stroke-linecap="round"/>
+      <path d="M80 74 q8 -10 16 0" stroke="#f3c66b" stroke-width="4" fill="none" stroke-linecap="round"/>
+      <circle cx="38" cy="80" r="4" fill="#e7877d" opacity=".7"/>
+      <circle cx="102" cy="80" r="4" fill="#e7877d" opacity=".7"/>
+      <rect x="30" y="58" width="22" height="4" rx="2" fill="#fff" opacity=".18"/>
+      <path d="M34 46 Q42 10 80 8 Q108 8 120 34 Q108 24 94 26 Q104 36 106 46 Z" fill="#c4473d"/>
+      <circle cx="121" cy="36" r="8" fill="#fdf6ea"/>
+      <rect x="28" y="38" width="84" height="14" rx="7" fill="#fdf6ea"/>
+    </svg>
+    <div class="hero-text">
+      <p class="eyebrow">VR &amp; AR group · 2026</p>
+      <h1 id="title">Christmas Dinner</h1>
+      <p class="lede">Partners, family &amp; plus-ones are <em>very</em> welcome 🎄</p>
+    </div>
+    <div class="chips" id="heroChips"></div>
+  </header>
+
+  <main>
+    <div class="demo-banner" id="demoBanner" hidden>
+      Demo mode. Everything you enter is only saved in this browser. Add the backend URL in <code>config.js</code> to go live.
+    </div>
+
+    <section class="card me">
+      <div class="me-row">
+        <label for="myName" class="me-label">👋 Hi, I’m</label>
+        <input id="myName" class="me-input" type="text" maxlength="60" placeholder="your name" autocomplete="given-name">
+      </div>
+      <p class="todo" id="todoLine"></p>
+    </section>
+
+    <div class="steps" role="tablist" aria-label="Sign-up steps">
+      <button class="step" role="tab" id="tab-dates" data-tab="dates" aria-controls="dates">
+        <span class="dot">1</span><span class="step-txt"><span class="lbl">Dates</span><span class="st">to do</span></span>
+      </button>
+      <button class="step" role="tab" id="tab-food" data-tab="food" aria-controls="food">
+        <span class="dot">2</span><span class="step-txt"><span class="lbl">Food</span><span class="st">to do</span></span>
+      </button>
+      <button class="step" role="tab" id="tab-santa" data-tab="santa" aria-controls="santa">
+        <span class="dot">3</span><span class="step-txt"><span class="lbl">Secret Santa</span><span class="st">to do</span></span>
+      </button>
+      <button class="step admin-tab" role="tab" id="tab-admin" data-tab="admin" aria-controls="admin" aria-label="Organiser" hidden>
+        <span class="dot">🔧</span>
+      </button>
+    </div>
+
+    <!-- ───────────── 1 DATES ───────────── -->
+    <section class="card panel" id="dates" role="tabpanel" aria-labelledby="tab-dates">
+      <div class="card-head">
+        <h2>When works for you?</h2>
+        <p>Mark each evening <b class="k-yes">✓ yes</b>, <b class="k-maybe">? maybe</b> or <b class="k-no">✗ no</b>, then save. We start at 18:00.</p>
+      </div>
+
+      <div class="final-banner" id="finalBanner" hidden></div>
+      <p class="best" id="bestLine"></p>
+
+      <div class="date-grid" id="dateGrid"></div>
+
+      <div class="vote-bar">
+        <div class="guests">
+          <span>Bringing</span>
+          <div class="stepper">
+            <button type="button" data-guests="-1" aria-label="One less guest">−</button>
+            <output id="guestCount">0</output>
+            <button type="button" data-guests="1" aria-label="One more guest">+</button>
+          </div>
+          <span>guest(s) <small>(partner, family…)</small></span>
+        </div>
+        <button class="btn primary" id="saveVotes" type="button">Save my dates</button>
+      </div>
+
+      <div class="panel-foot">
+        <details class="suggest">
+          <summary>Suggest another date</summary>
+          <form id="addDateForm" class="row">
+            <input type="date" id="newDate" required min="2026-11-01" max="2027-01-31" aria-label="Date">
+            <input type="time" id="newTime" value="18:00" step="900" aria-label="Start time">
+            <button class="btn" type="submit">Add date</button>
+          </form>
+        </details>
+        <button class="next" type="button" data-goto="food">Next: Food →</button>
+      </div>
+    </section>
+
+    <!-- ───────────── 2 FOOD ───────────── -->
+    <section class="card panel" id="food" role="tabpanel" aria-labelledby="tab-food" hidden>
+      <div class="card-head">
+        <h2>What are you bringing?</h2>
+        <p>Potluck style. Check what’s missing, then add your dish.</p>
+      </div>
+
+      <form id="foodForm" class="food-form">
+        <input id="dish" type="text" maxlength="120" placeholder="e.g. grandma’s gingerbread" required aria-label="Dish">
+        <select id="category" aria-label="Category"></select>
+        <button class="btn primary" type="submit">Add dish</button>
+        <div class="tag-pick" id="tagPick"></div>
+      </form>
+
+      <div class="food-grid" id="foodGrid"></div>
+
+      <div class="panel-foot">
+        <span></span>
+        <button class="next" type="button" data-goto="santa">Next: Secret Santa →</button>
+      </div>
+    </section>
+
+    <!-- ───────────── 3 SANTA ───────────── -->
+    <section class="card panel" id="santa" role="tabpanel" aria-labelledby="tab-santa" hidden>
+      <div class="card-head">
+        <h2>Secret Santa</h2>
+        <p>Join with a PIN. After the draw you’ll use it to see who you’re gifting.</p>
+      </div>
+
+      <div class="santa-info" id="santaInfo"></div>
+
+      <div id="santaJoin">
+        <form id="joinForm" class="santa-form">
+          <input id="pin" type="password" minlength="4" maxlength="40" placeholder="PIN (4+ characters)" required autocomplete="off" aria-label="PIN">
+          <textarea id="wishlist" maxlength="500" rows="2" placeholder="Wishlist / hints (optional): likes, dislikes, “surprise me!”…" aria-label="Wishlist"></textarea>
+          <div class="row">
+            <button class="btn primary" type="submit" id="joinBtn">Count me in 🎁</button>
+            <button class="btn ghost" type="button" id="leaveBtn" hidden>Leave</button>
+            <span class="fine">Not an important password, just a simple PIN. Forgot it? The organiser can reset it.</span>
+          </div>
+        </form>
+      </div>
+
+      <div id="santaReveal" hidden>
+        <div class="drawn-banner">✨ The names have been drawn! ✨</div>
+        <form id="revealForm" class="row">
+          <input id="revealPin" type="password" maxlength="40" placeholder="your PIN" required autocomplete="off" aria-label="PIN">
+          <button class="btn primary" type="submit">Reveal my person</button>
+        </form>
+        <p class="fine">Forgot your PIN? Ask the organiser for a new one. You’ll still get the same person.</p>
+        <div class="gift" id="giftCard" hidden></div>
+        <details class="suggest">
+          <summary>Update my own wishlist</summary>
+          <form id="wishUpdateForm" class="santa-form">
+            <input id="pin2" type="password" maxlength="40" placeholder="your PIN" required autocomplete="off" aria-label="PIN">
+            <textarea id="wishlist2" maxlength="500" rows="2" placeholder="New wishlist / hints" aria-label="Wishlist"></textarea>
+            <button class="btn" type="submit">Update wishlist</button>
+          </form>
+        </details>
+      </div>
+
+      <h3 class="sub">Elves so far <span class="count" id="elfCount">0</span></h3>
+      <div class="elves" id="elves"></div>
+    </section>
+
+    <!-- ───────────── ADMIN (tab appears with ?admin) ───────────── -->
+    <section class="card panel admin" id="admin" role="tabpanel" aria-labelledby="tab-admin" hidden>
+      <div class="card-head">
+        <h2>🔧 Organiser corner</h2>
+        <p>Needs the admin code. Running the draw doesn’t show you any pairs.</p>
+      </div>
+      <form id="adminLogin" class="row">
+        <input id="adminCode" type="password" placeholder="admin code" required autocomplete="off" aria-label="Admin code">
+        <button class="btn" type="submit">Unlock</button>
+      </form>
+      <div id="adminTools" hidden>
+        <div class="row">
+          <select id="finalSelect" aria-label="Final date"></select>
+          <button class="btn primary" type="button" id="setFinal">Set as final date</button>
+          <button class="btn ghost" type="button" id="clearFinal">Clear</button>
+        </div>
+        <div class="row">
+          <button class="btn primary" type="button" id="runDraw">Run the secret santa draw</button>
+          <button class="btn ghost" type="button" id="undoDraw">Undo the draw</button>
+        </div>
+        <form id="resetPinForm" class="row">
+          <input id="resetName" type="text" maxlength="60" placeholder="who forgot their PIN?" required autocomplete="off" aria-label="Participant name">
+          <input id="resetNewPin" type="text" minlength="4" maxlength="40" placeholder="new PIN" required autocomplete="off" aria-label="New PIN">
+          <button class="btn" type="submit">Reset PIN 🔑</button>
+        </form>
+        <p class="fine">Location, budget and gift note can be edited in the <b>config</b> tab of the Google Sheet.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>Made with 🎄 and ☕ for the VR &amp; AR group</footer>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
