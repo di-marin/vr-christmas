@@ -85,7 +85,7 @@
   }
 
   function syncDraft() {
-    if (draft.dirty && draft.forName === key(me)) return;
+    if (draft.dirty) return; // unsaved taps win (also while someone is still typing their name)
     const mine = S.votes.find((v) => key(v.name) === key(me));
     draft = {
       votes: mine ? Object.assign({}, mine.votes) : {},
@@ -202,10 +202,43 @@
     }).join('');
 
     $('guestCount').textContent = draft.guests;
-    const save = $('saveVotes');
-    const hasRow = S.votes.some((v) => key(v.name) === key(me));
-    save.textContent = draft.dirty || !hasRow ? 'Save my dates' : 'Saved ✓';
-    save.classList.toggle('pulse', draft.dirty);
+  }
+
+  /* ───────── date auto-save ───────── */
+  let saveTimer;
+  let saveChain = Promise.resolve();
+
+  function setSaveState(s) {
+    const el = $('saveState');
+    el.dataset.s = s || '';
+    el.textContent = { saving: 'Saving…', saved: 'Saved ✓', error: 'Not saved. Tap a date to retry' }[s] || 'Your answers save automatically';
+  }
+
+  function queueSave() {
+    draft.dirty = true;
+    setSaveState('saving');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushSave, 800);
+  }
+
+  // saves the current draft (if anything changed); resolves when done
+  function flushSave() {
+    clearTimeout(saveTimer);
+    saveChain = saveChain.then(async () => {
+      if (!draft.dirty || !key(me)) return;
+      const payload = { name: me, guests: draft.guests, votes: Object.assign({}, draft.votes) };
+      draft.dirty = false;
+      try {
+        const r = await api('vote', payload);
+        setState(r.state);
+        if (!draft.dirty) setSaveState('saved');
+      } catch (e) {
+        draft.dirty = true;
+        setSaveState('error');
+        toast('Couldn’t save your dates: ' + e.message, true);
+      }
+    });
+    return saveChain;
   }
 
   function renderFood() {
@@ -265,7 +298,7 @@
   function progress() {
     const k = key(me);
     return {
-      dates: !!k && S.votes.some((v) => key(v.name) === k),
+      dates: !!k && S.votes.some((v) => key(v.name) === k && Object.keys(v.votes || {}).length > 0),
       food: !!k && S.food.some((f) => key(f.name) === k),
       santa: !!k && S.santa.participants.some((p) => key(p.name) === k),
     };
@@ -276,10 +309,14 @@
     const done = STEPS.filter((s) => p[s]).length;
     STEPS.forEach((s) => {
       const tab = $('tab-' + s);
+      const locked = isLocked(s);
       tab.classList.toggle('done', p[s]);
-      tab.querySelector('.dot').textContent = p[s] ? '✓' : String(STEPS.indexOf(s) + 1);
-      tab.querySelector('.st').textContent = p[s] ? 'done' : 'to do';
+      tab.classList.toggle('locked', locked);
+      tab.setAttribute('aria-disabled', String(locked));
+      tab.querySelector('.dot').textContent = p[s] ? '✓' : locked ? '🔒' : String(STEPS.indexOf(s) + 1);
+      tab.querySelector('.st').textContent = p[s] ? 'done' : locked ? 'dates first' : 'to do';
     });
+    if (isLocked(currentTab)) showTab('dates');
     const line = $('todoLine');
     line.classList.toggle('done', done === 3);
     if (!key(me)) {
@@ -293,9 +330,29 @@
     $('tab-admin').hidden = !isAdminPage();
   }
 
+  // Food and Secret Santa open only after you've answered at least one date
+  const isLocked = (id) => (id === 'food' || id === 'santa') && !progress().dates;
+
+  async function goTo(id, focus, btn) {
+    if (id === currentTab) return;
+    if (id === 'food' || id === 'santa') {
+      if (needName()) return;
+      if (btn) btn.disabled = true;
+      try { await flushSave(); } finally { if (btn) btn.disabled = false; }
+      if (draft.dirty) return; // save failed, error already shown
+      if (isLocked(id)) {
+        showTab('dates');
+        toast('First tap ✓, ? or ✗ for at least one date 🙂', true);
+        return;
+      }
+    }
+    showTab(id, focus);
+  }
+
   function showTab(id, focus) {
     if (id === 'admin' && !isAdminPage()) id = 'dates';
     if (!STEPS.includes(id) && id !== 'admin') id = 'dates';
+    if (isLocked(id)) id = 'dates';
     currentTab = id;
     STEPS.concat('admin').forEach((s) => {
       $(s).hidden = s !== id;
@@ -327,15 +384,15 @@
   /* ───────── events ───────── */
   function bind() {
     // tabs: click, ←/→ keys, and "Next" buttons
-    document.querySelectorAll('[data-tab]').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
+    document.querySelectorAll('[data-tab]').forEach((t) => t.addEventListener('click', () => goTo(t.dataset.tab, false, t)));
     document.querySelector('.steps').addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
       const tabs = Array.from(document.querySelectorAll('.step:not([hidden])'));
       const i = tabs.findIndex((t) => t.dataset.tab === currentTab);
       const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
-      showTab(next.dataset.tab, true);
+      goTo(next.dataset.tab, true);
     });
-    document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.goto)));
+    document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => goTo(b.dataset.goto, false, b)));
     window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
 
     const nameInput = $('myName');
@@ -343,6 +400,7 @@
     nameInput.addEventListener('input', () => {
       me = nameInput.value.trim();
       store.set('name', me);
+      if (!draft.dirty) setSaveState('');
       syncDraft();
       render();
     });
@@ -355,24 +413,17 @@
       const id = b.dataset.date;
       draft.votes[id] = draft.votes[id] === b.dataset.v ? undefined : b.dataset.v;
       if (!draft.votes[id]) delete draft.votes[id];
-      draft.dirty = true;
-      draft.forName = key(me);
+      queueSave();
       renderDates();
     });
     document.querySelectorAll('[data-guests]').forEach((b) => b.addEventListener('click', () => {
+      if (needName()) return;
       draft.guests = Math.max(0, Math.min(20, draft.guests + Number(b.dataset.guests)));
-      draft.dirty = true;
-      draft.forName = key(me);
+      queueSave();
       renderDates();
     }));
-    $('saveVotes').addEventListener('click', (e) => {
-      if (needName()) return;
-      run(e.currentTarget, async () => {
-        const r = await api('vote', { name: me, guests: draft.guests, votes: draft.votes });
-        draft.dirty = false;
-        setState(r.state);
-        toast('Availability saved, thank you! 🎄');
-      });
+    window.addEventListener('beforeunload', (e) => {
+      if (draft.dirty) { flushSave(); e.preventDefault(); e.returnValue = ''; }
     });
     $('addDateForm').addEventListener('submit', (e) => {
       e.preventDefault();
@@ -618,7 +669,10 @@
   if (DEMO) $('demoBanner').insertAdjacentHTML('beforeend', ' Admin code in demo: <code>elf</code> (open the page with <code>?admin</code>).');
   snow();
   bind();
+  const wantedTab = (location.hash || '#dates').slice(1);
   render();
-  showTab((location.hash || '#dates').slice(1));
-  apiState().then(setState).catch((e) => toast('Could not load data: ' + e.message, true));
+  setSaveState('');
+  showTab(wantedTab);
+  apiState().then((s) => { setState(s); showTab(wantedTab); })
+    .catch((e) => toast('Could not load data: ' + e.message, true));
 })();

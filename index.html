@@ -69,7 +69,7 @@
     <section class="card panel" id="dates" role="tabpanel" aria-labelledby="tab-dates">
       <div class="card-head">
         <h2>When works for you?</h2>
-        <p>Mark each evening <b class="k-yes">✓ yes</b>, <b class="k-maybe">? maybe</b> or <b class="k-no">✗ no</b>, then save. We start at 18:00.</p>
+        <p>Mark each evening <b class="k-yes">✓ yes</b>, <b class="k-maybe">? maybe</b> or <b class="k-no">✗ no</b>. We start at 18:00.</p>
       </div>
 
       <div class="final-banner" id="finalBanner" hidden></div>
@@ -87,7 +87,7 @@
           </div>
           <span>guest(s) <small>(partner, family…)</small></span>
         </div>
-        <button class="btn primary" id="saveVotes" type="button">Save my dates</button>
+        <span class="save-state" id="saveState" role="status" aria-live="polite"></span>
       </div>
 
       <div class="panel-foot">
@@ -99,7 +99,7 @@
             <button class="btn" type="submit">Add date</button>
           </form>
         </details>
-        <button class="next" type="button" data-goto="food">Next: Food →</button>
+        <button class="next primary-next" type="button" data-goto="food">Next: Food →</button>
       </div>
     </section>
 
@@ -107,7 +107,7 @@
     <section class="card panel" id="food" role="tabpanel" aria-labelledby="tab-food" hidden>
       <div class="card-head">
         <h2>What are you bringing?</h2>
-        <p>Potluck style. Check what’s missing, then add your dish.</p>
+        <p>Bring a dish to share, homemade or bought, big or small. Have a look at what’s already coming, then add yours.</p>
       </div>
 
       <form id="foodForm" class="food-form">

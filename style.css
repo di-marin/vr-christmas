@@ -141,6 +141,10 @@ textarea { width: 100%; resize: vertical; }
 .step .st { font-size: 11.5px; font-weight: 700; color: var(--red); }
 .step.done .st { color: var(--green); }
 .step[aria-selected=true] .st { color: #f3c66b; }
+.step.locked { opacity: .6; }
+.step.locked .dot { background: var(--bg); border-color: var(--line); color: var(--muted); font-size: 11px; }
+.step.locked .st { color: var(--muted); }
+.step:disabled { cursor: wait; }
 .admin-tab { flex: 0 0 auto; }
 .admin-tab .dot { background: var(--bg); border-color: var(--line); }
 
@@ -150,6 +154,13 @@ textarea { width: 100%; resize: vertical; }
   border-radius: 999px; padding: 6px 14px; cursor: pointer;
 }
 .next:hover { background: #d4e6dc; }
+.next.primary-next { background: var(--red); color: #fff; padding: 8px 18px; }
+.next.primary-next:hover { background: #b23e35; }
+.next:disabled { opacity: .6; cursor: wait; }
+.save-state { font-size: 13px; font-weight: 700; color: var(--muted); }
+.save-state[data-s=saving] { color: var(--gold); }
+.save-state[data-s=saved] { color: var(--green); }
+.save-state[data-s=error] { color: var(--red); }
 
 /* ───────── dates ───────── */
 .best { margin: 0 0 10px; font-weight: 700; color: var(--green); font-size: 14px; }
@@ -285,5 +296,4 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 4px 
   .tally { gap: 5px; font-size: 11px; }
   .food-form { grid-template-columns: 1fr auto; }
   .food-form #dish { grid-column: 1 / -1; }
-  .vote-bar .btn { width: 100%; }
 }
