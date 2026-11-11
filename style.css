@@ -276,6 +276,28 @@ textarea { width: 100%; resize: vertical; }
 }
 .toast.show { transform: translate(-50%, 0); opacity: 1; visibility: visible; }
 .toast.err { background: var(--red); }
+.sync {
+  position: fixed; top: 10px; right: 10px; z-index: 20;
+  background: var(--paper); color: var(--muted); border: 1px solid var(--line); box-shadow: var(--shadow);
+  font-size: 12px; font-weight: 800; padding: 3px 10px 3px 22px; border-radius: 999px;
+}
+.sync::before {
+  content: ''; position: absolute; left: 9px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px;
+  border-radius: 50%; background: var(--gold); animation: blink 1s ease-in-out infinite;
+}
+.sync.err { color: var(--red); }
+.sync.err::before { background: var(--red); }
+@keyframes blink { 50% { opacity: .25; } }
+
+/* items shown on the page but still on their way to Google */
+.date-card.pending, .cat li.pending { opacity: .6; }
+.date-card.pending .seg button { cursor: progress; }
+
+.gift.opening { border-style: dotted; }
+.gift .unwrap { font-size: 44px; line-height: 1; animation: wiggle .5s ease-in-out infinite; display: inline-block; }
+@keyframes wiggle { 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+@media (prefers-reduced-motion: reduce) { .gift .unwrap, .sync::before { animation: none; } }
+
 footer { text-align: center; color: var(--muted); font-size: 12px; padding: 4px 16px 24px; }
 
 @media (max-width: 560px) {

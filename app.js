@@ -59,31 +59,96 @@
     if (!data.ok) throw new Error(data.error || 'Could not load');
     return data.state;
   }
+  // errors the backend answered with (wrong PIN, …) are marked .server: those get undone, not retried
+  const serverError = (msg) => Object.assign(new Error(msg || 'Something went wrong'), { server: true });
+
   async function api(action, payload) {
     if (DEMO) {
-      const result = demo.call(action, payload || {});
+      let result;
+      try { result = demo.call(action, payload || {}); } catch (e) { throw serverError(e.message); }
       return { result, state: demo.state() };
     }
     // text/plain body = no CORS preflight, which Apps Script can't answer
     const res = await fetch(API, { method: 'POST', body: JSON.stringify(Object.assign({ action }, payload)) });
     const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Something went wrong');
+    if (!data.ok) throw serverError(data.error);
     return data;
   }
 
   /* ───────── app state ───────── */
   let S = { config: {}, dates: [], votes: [], food: [], santa: { participants: [], drawn: false } };
+  let serverState = S;   // what Google last told us
+  const pending = [];    // actions shown on the page but not yet confirmed by Google
   let me = store.get('name', '');
   let draft = { votes: {}, guests: 0, dirty: false, forName: null };
   let myFood = store.get('myFood', []);
   let adminCode = session.get('admin');
 
-  function setState(s) {
-    S = s;
-    if (!DEMO) store.set('lastState', s); // lets the page open instantly next time
-    syncDraft();
+  // page state = server state + everything still on its way to Google
+  function rebuild() {
+    S = JSON.parse(JSON.stringify(serverState));
+    pending.forEach((op) => { try { if (op.apply) op.apply(S); } catch (e) { /* ignore */ } });
     applyDraft();
+  }
+
+  function setState(s) {
+    serverState = s;
+    if (!DEMO) store.set('lastState', s); // lets the page open instantly next time
+    rebuild();
+    syncDraft();
     render();
+  }
+
+  /* ───────── background actions: update the page now, talk to Google later ───────── */
+  let opChain = Promise.resolve();
+  const idMap = {}; // temporary id → real id once Google has saved it
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const tmpId = () => 'tmp-' + Math.random().toString(36).slice(2, 9);
+  const realId = (id) => idMap[id] || id;
+  let offline = false;
+
+  function bg(action, payload, opts) {
+    opts = opts || {};
+    const op = { apply: opts.apply };
+    pending.push(op);
+    rebuild();
+    render();
+    updateSync();
+    const drop = () => { const i = pending.indexOf(op); if (i >= 0) pending.splice(i, 1); };
+    opChain = opChain.then(async () => {
+      for (;;) {
+        try {
+          const r = await api(action, typeof payload === 'function' ? payload() : payload);
+          offline = false;
+          drop();
+          if (opts.done) opts.done(r.result);
+          setState(r.state);
+          break;
+        } catch (e) {
+          if (e.server) { // Google said no → undo on the page
+            offline = false;
+            drop();
+            rebuild();
+            render();
+            toast(e.message, true);
+            if (opts.failed) opts.failed(e);
+            break;
+          }
+          offline = true; // network trouble → keep it on the page and retry
+          updateSync();
+          await sleep(5000);
+        }
+      }
+      updateSync();
+    });
+  }
+
+  function updateSync() {
+    const busy = pending.length || draft.dirty || inFlight;
+    const el = $('sync');
+    el.hidden = !busy;
+    el.textContent = offline ? 'Offline, retrying…' : 'Saving…';
+    el.classList.toggle('err', offline);
   }
 
   function syncDraft() {
@@ -95,17 +160,6 @@
       dirty: false,
       forName: key(me),
     };
-  }
-
-  async function run(btn, fn) {
-    if (btn) btn.disabled = true;
-    try {
-      return await fn();
-    } catch (e) {
-      toast(e.message || 'Something went wrong', true);
-    } finally {
-      if (btn) btn.disabled = false;
-    }
   }
 
   function needName() {
@@ -192,8 +246,9 @@
       const mine = draft.votes[d.id] || '';
       const who = s.yes.map((v) => `<span>${esc(v.name)}${v.guests ? ' +' + v.guests : ''}</span>`)
         .concat(s.maybe.map((v) => `<span class="maybe" title="maybe">${esc(v.name)}?</span>`)).join('');
-      const btn = (v, label) => `<button type="button" data-date="${esc(d.id)}" data-v="${v}" aria-pressed="${mine === v}" aria-label="${v}" title="${v}">${label}</button>`;
-      return `<div class="date-card${isFinal ? ' final' : ''}${isBest ? ' best-pick' : ''}">
+      const wait = d.id.startsWith('tmp-'); // just suggested, voting opens once Google has saved it
+      const btn = (v, label) => `<button type="button" data-date="${esc(d.id)}" data-v="${v}" aria-pressed="${mine === v}" aria-label="${v}" title="${v}"${wait ? ' disabled' : ''}>${label}</button>`;
+      return `<div class="date-card${isFinal ? ' final' : ''}${isBest ? ' best-pick' : ''}${wait ? ' pending' : ''}">
         ${isFinal ? '<span class="badge">it’s this one!</span>' : isBest ? '<span class="badge">favourite</span>' : ''}
         <div class="date-when"><span class="day">${parseDate(d.date).getDate()}</span>
           <span class="dm"><span>${esc(fmtDow(d.date))}</span> <span>${esc(fmtMonth(d.date))} · ${esc(d.time)}</span></span></div>
@@ -229,6 +284,7 @@
   function queueSave() {
     draft.dirty = true;
     setSaveState('saving');
+    updateSync();
     applyDraft();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushSave, 500);
@@ -255,6 +311,7 @@
         if (first) toast('Couldn’t save your dates, retrying… (' + e.message + ')', true);
         saveTimer = setTimeout(flushSave, 5000);
       }
+      updateSync();
     });
     return saveChain;
   }
@@ -273,7 +330,7 @@
         const tags = (f.tags || []).map((id) => TAGS.find((t) => t.id === id)).filter(Boolean)
           .map((t) => `<i class="${t.warn ? 'warn' : ''}" title="${t.label}">${t.short}</i>`).join('');
         const canDelete = mineSet.has(f.id) || key(f.name) === key(me);
-        return `<li><div class="txt"><span class="dish">${esc(f.dish)}</span>${tags ? `<span class="tags">${tags}</span>` : ''}
+        return `<li${f.id.startsWith('tmp-') ? ' class="pending"' : ''}><div class="txt"><span class="dish">${esc(f.dish)}</span>${tags ? `<span class="tags">${tags}</span>` : ''}
           <div class="by">by ${esc(f.name)}</div></div>
           ${canDelete ? `<button class="x" type="button" data-remove="${esc(f.id)}" aria-label="Remove ${esc(f.dish)}">×</button>` : ''}</li>`;
       }).join('');
@@ -439,127 +496,155 @@
       render();
     }));
     window.addEventListener('beforeunload', (e) => {
-      if (draft.dirty || inFlight) { flushSave(); e.preventDefault(); e.returnValue = ''; }
+      if (draft.dirty || inFlight || pending.length) { flushSave(); e.preventDefault(); e.returnValue = ''; }
     });
     $('addDateForm').addEventListener('submit', (e) => {
       e.preventDefault();
       if (needName()) return;
-      run(e.submitter, async () => {
-        const r = await api('addDate', { name: me, date: $('newDate').value, time: $('newTime').value });
-        $('newDate').value = '';
-        setState(r.state);
-        toast('Date added. Don’t forget to vote on it!');
+      const date = $('newDate').value;
+      const time = $('newTime').value || '18:00';
+      if (S.dates.some((d) => d.date === date && d.time === time)) { toast('That date is already on the list.', true); return; }
+      const id = tmpId();
+      bg('addDate', { name: me, date, time }, {
+        apply: (s) => s.dates.push({ id, date, time, addedBy: me }),
       });
+      $('newDate').value = '';
+      toast('Date added. Don’t forget to vote on it!');
     });
 
     // food
     $('foodForm').addEventListener('submit', (e) => {
       e.preventDefault();
       if (needName()) return;
+      const dish = $('dish').value.trim();
+      if (!dish) return;
+      const category = $('category').value;
       const tags = Array.from(document.querySelectorAll('#tagPick input:checked')).map((i) => i.value);
-      run(e.submitter, async () => {
-        const r = await api('addFood', { name: me, dish: $('dish').value, category: $('category').value, tags });
-        if (r.result && r.result.id) { myFood.push(r.result.id); store.set('myFood', myFood); }
-        $('dish').value = '';
-        document.querySelectorAll('#tagPick input').forEach((i) => { i.checked = false; });
-        setState(r.state);
-        toast('Yum! Added to the menu 🍽');
+      const id = tmpId();
+      const name = me;
+      myFood.push(id);
+      bg('addFood', { name, dish, category, tags }, {
+        apply: (s) => s.food.push({ id, name, category, dish, tags }),
+        done: (r) => {
+          if (!r || !r.id) return;
+          idMap[id] = r.id;
+          myFood = myFood.map((x) => (x === id ? r.id : x));
+          store.set('myFood', myFood);
+        },
       });
+      $('dish').value = '';
+      document.querySelectorAll('#tagPick input').forEach((i) => { i.checked = false; });
+      toast('Yum! Added to the menu 🍽');
     });
     $('foodGrid').addEventListener('click', (e) => {
       const b = e.target.closest('[data-remove]');
       if (!b || !confirm('Remove this dish?')) return;
-      run(b, async () => {
-        const r = await api('removeFood', { id: b.dataset.remove });
-        setState(r.state);
+      const id = b.dataset.remove;
+      bg('removeFood', () => ({ id: realId(id) }), {
+        apply: (s) => { s.food = s.food.filter((f) => f.id !== id && f.id !== realId(id)); },
       });
     });
 
     // santa
+    const joinSanta = (pin, wishlist) => {
+      const name = me;
+      const already = S.santa.participants.some((p) => key(p.name) === key(name));
+      bg('santaJoin', { name, pin, wishlist }, {
+        apply: (s) => {
+          const p = s.santa.participants.find((x) => key(x.name) === key(name));
+          if (p) p.hasWishlist = !!wishlist.trim(); else s.santa.participants.push({ name, hasWishlist: !!wishlist.trim() });
+        },
+      });
+      toast(already ? 'Wishlist updated 📝' : 'You’re in! Ho ho ho 🎅');
+    };
     $('joinForm').addEventListener('submit', (e) => {
       e.preventDefault();
       if (needName()) return;
-      run(e.submitter, async () => {
-        const r = await api('santaJoin', { name: me, pin: $('pin').value, wishlist: $('wishlist').value });
-        $('pin').value = '';
-        setState(r.state);
-        toast(r.result && r.result.updated ? 'Wishlist updated 📝' : 'You’re in! Ho ho ho 🎅');
-      });
+      joinSanta($('pin').value, $('wishlist').value);
+      $('pin').value = '';
     });
-    $('leaveBtn').addEventListener('click', (e) => {
+    $('leaveBtn').addEventListener('click', () => {
       const pin = $('pin').value;
       if (!pin) { toast('Enter your PIN to leave', true); $('pin').focus(); return; }
       if (!confirm('Leave secret santa?')) return;
-      run(e.currentTarget, async () => {
-        const r = await api('santaLeave', { name: me, pin });
-        $('pin').value = '';
-        setState(r.state);
-        toast('You left secret santa.');
+      const name = me;
+      bg('santaLeave', { name, pin }, {
+        apply: (s) => { s.santa.participants = s.santa.participants.filter((p) => key(p.name) !== key(name)); },
       });
-    });
-    $('revealForm').addEventListener('submit', (e) => {
-      e.preventDefault();
-      if (needName()) return;
-      run(e.submitter, async () => {
-        const r = await api('santaReveal', { name: me, pin: $('revealPin').value });
-        $('revealPin').value = '';
-        const g = $('giftCard');
-        g.hidden = false;
-        g.innerHTML = `<div class="to">You’re secret santa for… 🤫</div>
-          <div class="name">${esc(r.result.receiver)}</div>
-          <div class="wish">${r.result.wishlist ? esc(r.result.wishlist) : 'No wishlist yet. Surprise them! ✨'}</div>
-          <p class="fine">Shh, keep it a secret!</p>`;
-      });
+      $('pin').value = '';
+      toast('You left secret santa.');
     });
     $('wishUpdateForm').addEventListener('submit', (e) => {
       e.preventDefault();
       if (needName()) return;
-      run(e.submitter, async () => {
-        const r = await api('santaJoin', { name: me, pin: $('pin2').value, wishlist: $('wishlist2').value });
-        $('pin2').value = '';
-        setState(r.state);
-        toast('Wishlist updated 📝');
-      });
+      joinSanta($('pin2').value, $('wishlist2').value);
+      $('pin2').value = '';
+    });
+    // the reveal needs Google's answer, so we show the gift "unwrapping" while we wait
+    $('revealForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (needName()) return;
+      const pin = $('revealPin').value;
+      $('revealPin').value = '';
+      const g = $('giftCard');
+      g.hidden = false;
+      g.classList.add('opening');
+      g.innerHTML = '<div class="unwrap">🎁</div><div class="to">Unwrapping…</div>';
+      try {
+        const r = await api('santaReveal', { name: me, pin });
+        g.classList.remove('opening');
+        g.innerHTML = `<div class="to">You’re secret santa for… 🤫</div>
+          <div class="name">${esc(r.result.receiver)}</div>
+          <div class="wish">${r.result.wishlist ? esc(r.result.wishlist) : 'No wishlist yet. Surprise them! ✨'}</div>
+          <p class="fine">Shh, keep it a secret!</p>`;
+      } catch (err) {
+        g.hidden = true;
+        g.classList.remove('opening');
+        toast(err.server ? err.message : 'Couldn’t reach the server. Please try again.', true);
+      }
     });
 
     // admin
     $('adminLogin').addEventListener('submit', (e) => {
       e.preventDefault();
       const code = $('adminCode').value;
-      run(e.submitter, async () => {
-        await api('checkAdmin', { adminCode: code });
-        adminCode = code;
-        session.set('admin', code);
-        renderAdmin();
-        toast('Welcome, head elf 🧝');
+      adminCode = code;
+      session.set('admin', code);
+      renderAdmin();
+      toast('Welcome, head elf 🧝');
+      bg('checkAdmin', { adminCode: code }, {
+        failed: () => { adminCode = ''; session.set('admin', ''); renderAdmin(); },
       });
     });
-    const adminAction = (action, extra, msg, ask) => (e) => {
+    const adminAction = (action, extra, apply, msg, ask) => () => {
       if (ask && !confirm(ask)) return;
-      run(e.currentTarget, async () => {
-        const r = await api(action, Object.assign({ adminCode }, extra && extra()));
-        setState(r.state);
-        toast(msg);
-      });
+      bg(action, Object.assign({ adminCode }, extra && extra()), { apply });
+      toast(msg);
     };
-    $('setFinal').addEventListener('click', adminAction('setFinalDate', () => ({ dateId: $('finalSelect').value }), 'Final date set 🎉'));
-    $('clearFinal').addEventListener('click', adminAction('setFinalDate', () => ({ dateId: '' }), 'Final date cleared'));
-    $('runDraw').addEventListener('click', adminAction('draw', null, 'Names drawn! 🎁', 'Run the draw now? People can’t join afterwards.'));
-    $('undoDraw').addEventListener('click', adminAction('undoDraw', null, 'Draw undone', 'Undo the draw? Everyone will get a new person when you draw again.'));
+    $('setFinal').addEventListener('click', () => {
+      const dateId = $('finalSelect').value;
+      if (dateId.startsWith('tmp-')) { toast('That date is still being saved, try again in a moment.', true); return; }
+      adminAction('setFinalDate', () => ({ dateId }), (s) => { s.config.finalDateId = dateId; }, 'Final date set 🎉')();
+    });
+    $('clearFinal').addEventListener('click', adminAction('setFinalDate', () => ({ dateId: '' }), (s) => { s.config.finalDateId = ''; }, 'Final date cleared'));
+    $('runDraw').addEventListener('click', () => {
+      if (S.santa.participants.length < 3) { toast('Need at least 3 people for a fun draw.', true); return; }
+      adminAction('draw', null, (s) => { s.santa.drawn = true; }, 'Names drawn! 🎁', 'Run the draw now? People can’t join afterwards.')();
+    });
+    $('undoDraw').addEventListener('click', adminAction('undoDraw', null, (s) => { s.santa.drawn = false; }, 'Draw undone', 'Undo the draw? Everyone will get a new person when you draw again.'));
     $('resetPinForm').addEventListener('submit', (e) => {
       e.preventDefault();
-      run(e.submitter, async () => {
-        const r = await api('resetPin', { adminCode, name: $('resetName').value, pin: $('resetNewPin').value });
-        $('resetName').value = '';
-        $('resetNewPin').value = '';
-        setState(r.state);
-        toast(`New PIN set for ${r.result.name} 🔑`);
-      });
+      const name = $('resetName').value.trim();
+      const pin = $('resetNewPin').value;
+      bg('resetPin', { adminCode, name, pin }, {});
+      $('resetName').value = '';
+      $('resetNewPin').value = '';
+      toast(`New PIN set for ${name} 🔑`);
     });
 
     // keep things fresh while the tab is open
     setInterval(() => {
-      if (document.hidden || draft.dirty || inFlight) return;
+      if (document.hidden || draft.dirty || inFlight || pending.length) return;
       apiState().then(setState).catch(() => {});
     }, 45000);
   }
