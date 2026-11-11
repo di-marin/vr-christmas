@@ -80,7 +80,9 @@
 
   function setState(s) {
     S = s;
+    if (!DEMO) store.set('lastState', s); // lets the page open instantly next time
     syncDraft();
+    applyDraft();
     render();
   }
 
@@ -214,28 +216,44 @@
     el.textContent = { saving: 'Saving…', saved: 'Saved ✓', error: 'Not saved. Tap a date to retry' }[s] || 'Your answers save automatically';
   }
 
+  let inFlight = 0;
+
+  // show my unsaved answers right away (counts, names, unlocked steps), without waiting for Google
+  function applyDraft() {
+    if (!key(me) || !(draft.dirty || inFlight)) return;
+    const row = { name: me, guests: draft.guests, votes: Object.assign({}, draft.votes) };
+    const i = S.votes.findIndex((v) => key(v.name) === key(me));
+    if (i >= 0) S.votes[i] = row; else S.votes.push(row);
+  }
+
   function queueSave() {
     draft.dirty = true;
     setSaveState('saving');
+    applyDraft();
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(flushSave, 800);
+    saveTimer = setTimeout(flushSave, 500);
   }
 
-  // saves the current draft (if anything changed); resolves when done
+  // saves the current draft in the background (if anything changed)
   function flushSave() {
     clearTimeout(saveTimer);
     saveChain = saveChain.then(async () => {
       if (!draft.dirty || !key(me)) return;
       const payload = { name: me, guests: draft.guests, votes: Object.assign({}, draft.votes) };
       draft.dirty = false;
+      inFlight++;
       try {
         const r = await api('vote', payload);
+        inFlight--;
         setState(r.state);
         if (!draft.dirty) setSaveState('saved');
       } catch (e) {
+        inFlight--;
         draft.dirty = true;
+        const first = $('saveState').dataset.s !== 'error';
         setSaveState('error');
-        toast('Couldn’t save your dates: ' + e.message, true);
+        if (first) toast('Couldn’t save your dates, retrying… (' + e.message + ')', true);
+        saveTimer = setTimeout(flushSave, 5000);
       }
     });
     return saveChain;
@@ -333,13 +351,11 @@
   // Food and Secret Santa open only after you've answered at least one date
   const isLocked = (id) => (id === 'food' || id === 'santa') && !progress().dates;
 
-  async function goTo(id, focus, btn) {
+  function goTo(id, focus) {
     if (id === currentTab) return;
     if (id === 'food' || id === 'santa') {
       if (needName()) return;
-      if (btn) btn.disabled = true;
-      try { await flushSave(); } finally { if (btn) btn.disabled = false; }
-      if (draft.dirty) return; // save failed, error already shown
+      if (draft.dirty) flushSave(); // keep saving in the background, no need to wait
       if (isLocked(id)) {
         showTab('dates');
         toast('First tap ✓, ? or ✗ for at least one date 🙂', true);
@@ -414,16 +430,16 @@
       draft.votes[id] = draft.votes[id] === b.dataset.v ? undefined : b.dataset.v;
       if (!draft.votes[id]) delete draft.votes[id];
       queueSave();
-      renderDates();
+      render();
     });
     document.querySelectorAll('[data-guests]').forEach((b) => b.addEventListener('click', () => {
       if (needName()) return;
       draft.guests = Math.max(0, Math.min(20, draft.guests + Number(b.dataset.guests)));
       queueSave();
-      renderDates();
+      render();
     }));
     window.addEventListener('beforeunload', (e) => {
-      if (draft.dirty) { flushSave(); e.preventDefault(); e.returnValue = ''; }
+      if (draft.dirty || inFlight) { flushSave(); e.preventDefault(); e.returnValue = ''; }
     });
     $('addDateForm').addEventListener('submit', (e) => {
       e.preventDefault();
@@ -543,7 +559,7 @@
 
     // keep things fresh while the tab is open
     setInterval(() => {
-      if (document.hidden || draft.dirty) return;
+      if (document.hidden || draft.dirty || inFlight) return;
       apiState().then(setState).catch(() => {});
     }, 45000);
   }
@@ -670,9 +686,11 @@
   snow();
   bind();
   const wantedTab = (location.hash || '#dates').slice(1);
-  render();
+  const cached = DEMO ? null : store.get('lastState', null);
+  if (cached) setState(cached); else render(); // show last known data instantly, refresh below
   setSaveState('');
   showTab(wantedTab);
-  apiState().then((s) => { setState(s); showTab(wantedTab); })
+  const startTab = currentTab;
+  apiState().then((s) => { setState(s); if (currentTab === startTab) showTab(wantedTab); })
     .catch((e) => toast('Could not load data: ' + e.message, true));
 })();

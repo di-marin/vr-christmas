@@ -78,8 +78,19 @@ function setup() {
 
 function doGet(e) {
   return respond_(function () {
-    return { state: getState_() };
+    var cache = CacheService.getScriptCache();
+    var cached = cache.get('state');
+    if (cached) return { state: JSON.parse(cached) };
+    return { state: freshState_() };
   });
+}
+
+// reads the Sheet and keeps a copy for 60 s, so page loads don't re-read all tabs every time
+// (hand edits in the Sheet show up on the page within a minute)
+function freshState_() {
+  var state = getState_();
+  try { CacheService.getScriptCache().put('state', JSON.stringify(state), 60); } catch (e) { /* too big → just skip caching */ }
+  return state;
 }
 
 function doPost(e) {
@@ -91,7 +102,7 @@ function doPost(e) {
     lock.waitLock(20000);
     try {
       var result = fn(body);
-      return { result: result === undefined ? null : result, state: getState_() };
+      return { result: result === undefined ? null : result, state: freshState_() };
     } finally {
       lock.releaseLock();
     }
