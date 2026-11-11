@@ -19,6 +19,8 @@
 }
 
 * { box-sizing: border-box; }
+/* everything a bit bigger on laptops/desktops; phones keep their own sizing */
+@media (min-width: 700px) { html { zoom: 1.15; } }
 body {
   margin: 0;
   background: var(--bg);
